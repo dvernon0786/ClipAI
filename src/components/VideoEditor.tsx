@@ -213,6 +213,29 @@ export default function VideoEditor() {
             ...payload.highlights.map((h) => ({ id: generateId(), start: parseT(h.start), end: parseT(h.end), label: h.label, color: h.color })),
           ];
         }
+        if (action.type === 'remove_cuts') {
+          const payload = action.payload as { removeAll?: boolean; start?: string; end?: string };
+          if (payload.removeAll) {
+            updated.cuts = [];
+          } else if (payload.start !== undefined && payload.end !== undefined) {
+            const parseT = (s: string) => { const [m, sec] = s.split(':').map(Number); return m * 60 + sec; };
+            const rangeStart = parseT(payload.start);
+            const rangeEnd = parseT(payload.end);
+            updated.cuts = updated.cuts.filter((c) => c.end <= rangeStart || c.start >= rangeEnd);
+          }
+        }
+        if (action.type === 'rewrite_transcript') {
+          const payload = action.payload as { segments: Array<{ start: string; end: string; newText: string }> };
+          const parseT = (s: string) => { const [m, sec] = s.split(':').map(Number); return m * 60 + sec; };
+          const rewrites = payload.segments.map((s) => ({ start: parseT(s.start), end: parseT(s.end), newText: s.newText }));
+          const newSegs = updated.transcript.map((seg) => {
+            const match = rewrites.find((r) => r.start <= seg.end && r.end >= seg.start);
+            return match ? { ...seg, text: match.newText } : seg;
+          });
+          const newRaw = newSegs.map((s) => `${String(Math.floor(s.start / 60)).padStart(2, '0')}:${String(s.start % 60).padStart(2, '0')} ${s.text}`).join('\n');
+          updated.transcript = newSegs;
+          updated.rawTranscript = newRaw;
+        }
       }
       return updated;
     });
