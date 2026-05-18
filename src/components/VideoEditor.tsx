@@ -1,9 +1,10 @@
 'use client';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import {
-  Upload, Play, Pause, Volume2, VolumeX, Maximize2,
+  Upload, Play, Pause, Volume2, VolumeX,
   Download, Settings, ChevronDown, Bot, Wrench, FileText,
-  AudioWaveform, Mic2, Video, X, Scissors, SkipBack, SkipForward
+  AudioWaveform, Mic2, Video, X, Scissors, SkipBack, SkipForward,
+  FolderOpen, Monitor, Eye, Type
 } from 'lucide-react';
 import type { ProjectState, UnderlordAction, AIToolResult, CutRegion, Caption, Clip } from '@/lib/types';
 import { generateId, formatTime } from '@/lib/utils';
@@ -14,6 +15,11 @@ import ExportModal from './ExportModal';
 import StudioSoundPanel from './StudioSoundPanel';
 import RegeneratePanel from './RegeneratePanel';
 import VideoGenPanel from './VideoGenPanel';
+import ProjectManager from './ProjectManager';
+import WaveformTimeline from './WaveformTimeline';
+import ScreenRecorder from './ScreenRecorder';
+import CaptionStylePanel, { CAPTION_PRESETS, getCaptionOverlayStyle } from './CaptionStylePanel';
+import EyeContactPanel from './EyeContactPanel';
 
 const MODELS = [
   { id: 'google/gemini-2.0-flash-001', label: 'Gemini 2.0 Flash', tag: 'free' },
@@ -23,7 +29,7 @@ const MODELS = [
   { id: 'google/gemini-flash-1.5-8b', label: 'Gemini Flash 1.5', tag: 'free' },
 ];
 
-type RightPanel = 'underlord' | 'tools' | 'transcript' | 'studio' | 'regenerate' | 'videogen';
+type RightPanel = 'underlord' | 'tools' | 'transcript' | 'studio' | 'regenerate' | 'videogen' | 'record' | 'captions' | 'eyecontact';
 type BottomPanel = 'cuts' | 'captions' | 'clips' | null;
 
 const INITIAL_STATE: ProjectState = {
@@ -46,14 +52,15 @@ export default function VideoEditor() {
   const [model, setModel] = useState(MODELS[0].id);
   const [showModelPicker, setShowModelPicker] = useState(false);
   const [showExport, setShowExport] = useState(false);
+  const [showProjectManager, setShowProjectManager] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
-  const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [captionStyleId, setCaptionStyleId] = useState('classic-white');
+  const [showWaveform, setShowWaveform] = useState(true);
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -242,9 +249,12 @@ export default function VideoEditor() {
     { id: 'underlord' as RightPanel, icon: <Bot size={14} />, label: 'Underlord' },
     { id: 'tools' as RightPanel, icon: <Wrench size={14} />, label: 'AI Tools' },
     { id: 'transcript' as RightPanel, icon: <FileText size={14} />, label: 'Transcript' },
+    { id: 'captions' as RightPanel, icon: <Type size={14} />, label: 'Caption Style' },
     { id: 'studio' as RightPanel, icon: <AudioWaveform size={14} />, label: 'Studio Sound' },
     { id: 'regenerate' as RightPanel, icon: <Mic2 size={14} />, label: 'Regenerate' },
-    { id: 'videogen' as RightPanel, icon: <Video size={14} />, label: 'Generate' },
+    { id: 'videogen' as RightPanel, icon: <Video size={14} />, label: 'Generate Video' },
+    { id: 'record' as RightPanel, icon: <Monitor size={14} />, label: 'Screen Recorder' },
+    { id: 'eyecontact' as RightPanel, icon: <Eye size={14} />, label: 'Eye Contact' },
   ];
 
   return (
@@ -315,6 +325,13 @@ export default function VideoEditor() {
               </div>
             )}
           </div>
+
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => setShowProjectManager(true)}
+          >
+            <FolderOpen size={13} /> Projects
+          </button>
 
           <button className="btn-icon" onClick={() => setShowSettings(!showSettings)}>
             <Settings size={14} />
@@ -401,22 +418,21 @@ export default function VideoEditor() {
             {/* Caption overlay */}
             {project.captions.length > 0 && project.videoUrl && (() => {
               const activeCap = project.captions.find((c) => currentTime >= c.time && currentTime <= c.endTime);
+              const style = CAPTION_PRESETS.find((p) => p.id === captionStyleId) || CAPTION_PRESETS[0];
+              const positionStyle: React.CSSProperties =
+                style.position === 'top'
+                  ? { top: 12, bottom: 'auto' }
+                  : style.position === 'center'
+                  ? { top: '50%', transform: 'translateY(-50%)', bottom: 'auto' }
+                  : { bottom: 12 };
               return activeCap ? (
                 <div
-                  className="absolute bottom-12 left-0 right-0 flex justify-center pointer-events-none"
+                  className="absolute left-0 right-0 flex justify-center pointer-events-none"
+                  style={positionStyle}
                 >
-                  <div
-                    className="px-4 py-1.5 rounded text-sm font-medium"
-                    style={{
-                      background: 'rgba(0,0,0,0.85)',
-                      color: '#fff',
-                      maxWidth: '80%',
-                      textAlign: 'center',
-                      fontFamily: 'var(--font-body)',
-                    }}
-                  >
+                  <span style={getCaptionOverlayStyle(style)}>
                     {activeCap.text}
-                  </div>
+                  </span>
                 </div>
               ) : null;
             })()}
@@ -487,6 +503,15 @@ export default function VideoEditor() {
                   {formatTime(currentTime).split('.')[0]} / {formatTime(project.videoDuration).split('.')[0]}
                 </span>
 
+                {/* Waveform toggle */}
+                <button
+                  className="btn btn-ghost btn-sm"
+                  onClick={() => setShowWaveform(!showWaveform)}
+                  style={{ borderColor: showWaveform ? 'var(--accent)' : 'var(--border)', color: showWaveform ? 'var(--accent)' : 'var(--muted)' }}
+                >
+                  <AudioWaveform size={11} /> Wave
+                </button>
+
                 {/* Bottom panel tabs */}
                 <div className="flex items-center gap-1">
                   {(['cuts', 'captions', 'clips'] as BottomPanel[]).map((panel) => {
@@ -509,6 +534,19 @@ export default function VideoEditor() {
               </div>
             </div>
           </div>
+
+          {/* Waveform Timeline */}
+          {showWaveform && project.videoUrl && (
+            <WaveformTimeline
+              videoUrl={project.videoUrl}
+              currentTime={currentTime}
+              duration={project.videoDuration}
+              cuts={project.cuts}
+              highlights={project.highlights}
+              clips={project.clips}
+              onSeek={seek}
+            />
+          )}
 
           {/* Bottom list panel */}
           {bottomPanel && (
@@ -639,6 +677,15 @@ export default function VideoEditor() {
                 onToggleRecording={toggleRecording}
               />
             )}
+            {rightPanel === 'captions' && (
+              <div className="overflow-y-auto h-full">
+                <CaptionStylePanel
+                  captions={project.captions}
+                  selectedStyleId={captionStyleId}
+                  onStyleChange={setCaptionStyleId}
+                />
+              </div>
+            )}
             {rightPanel === 'studio' && (
               <div className="overflow-y-auto h-full"><StudioSoundPanel /></div>
             )}
@@ -650,11 +697,28 @@ export default function VideoEditor() {
             {rightPanel === 'videogen' && (
               <div className="overflow-y-auto h-full"><VideoGenPanel /></div>
             )}
+            {rightPanel === 'record' && (
+              <div className="overflow-y-auto h-full">
+                <ScreenRecorder onUseRecording={loadVideo} />
+              </div>
+            )}
+            {rightPanel === 'eyecontact' && (
+              <div className="overflow-y-auto h-full">
+                <EyeContactPanel videoUrl={project.videoUrl} videoFile={project.videoFile} />
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {showExport && <ExportModal project={project} onClose={() => setShowExport(false)} />}
+      {showProjectManager && (
+        <ProjectManager
+          project={project}
+          onLoad={(state) => setProject((p) => ({ ...p, ...state }))}
+          onClose={() => setShowProjectManager(false)}
+        />
+      )}
     </div>
   );
 }
